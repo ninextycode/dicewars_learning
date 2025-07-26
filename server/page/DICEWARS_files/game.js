@@ -176,27 +176,27 @@ var Game = function(){
 	}
 
 	/////////////////////////////////////////////////////////////////////
-	// マップ作成
+	// マップ作成 (english: Map creation)
 	/////////////////////////////////////////////////////////////////////
 
 	this.make_map = function(){
 		var i,j,k,c,an;
 		
-		// 通番シャッフル
+		// 通番シャッフル (english: shuffle serial numbers)
 		for( i=0; i<this.cel_max; i++ ){
 			var r = Math.floor(Math.random()*this.cel_max);
 			var tmp=this.num[i]; this.num[i]=this.num[r]; this.num[r]=tmp;
 		}
-		// セル初期化
+		// セル初期化 (english: initialize cells)
 		for( i=0; i<this.cel_max; i++ ){
 			this.cel[i] = 0;
-			this.rcel[i] = 0;	// 隣接セル
+			this.rcel[i] = 0;	// 隣接セル (english: adjacent cell)
 		}
-		var an = 1;	// エリア番号
-		this.rcel[Math.floor(Math.random()*this.cel_max)] = 1;	// 最初のセル
+		var an = 1;	// エリア番号 (english: area number)
+		this.rcel[Math.floor(Math.random()*this.cel_max)] = 1;	// 最初のセル (english: first cell)
 		
 		while( 1 ){
-			// 浸透開始セルを決める
+			// 浸透開始セルを決める (english: decide starting cell for percolation)
 			var pos;
 			var min = 9999;
 			for( i=0; i<this.cel_max; i++ ){
@@ -208,13 +208,13 @@ var Game = function(){
 			}
 			if( min == 9999 ) break;
 
-			// 浸透開始
+			// 浸透開始 (english: start percolation)
 			var ret = this.percolate( pos, 8, an );
 			if( ret == 0 ) break;
 			an++;
 			if( an >= this.AREA_MAX ) break;
 		}
-		// 海で、面積１のセルを無くす
+		// 海で、面積１のセルを無くす (english: Remove cells of area 1 in the sea)
 		for( i=0; i<this.cel_max; i++ ){
 			if( this.cel[i] > 0 ) continue;
 			var pos;
@@ -227,15 +227,15 @@ var Game = function(){
 			}
 			if( f==0 ) this.cel[i] = a;
 		}
-		// エリアデータ初期化
+		// エリアデータ初期化 (english: initialize area data)
 		for( i=0; i<this.AREA_MAX; i++ ) this.adat[i] = new AreaData();
 
-		// 面積
+		// 面積 (english: area size)
 		for( i=0; i<this.cel_max; i++ ){
 			an = this.cel[i];
 			if( an>0 ) this.adat[an].size++;
 		}
-		// 面積10以下のエリアを消す
+		// 面積10以下のエリアを消す (english: remove areas with size <= 5)
 		for( i=1; i<this.AREA_MAX; i++ ){
 			if( this.adat[i].size <= 5 ) this.adat[i].size = 0;
 		}
@@ -244,7 +244,7 @@ var Game = function(){
 			if( this.adat[an].size == 0 ) this.cel[i] = 0;
 		}
 
-		// エリアの中心地を決める
+		// エリアの中心地を決める (english: decide center of area)
 		for( i=1; i<this.AREA_MAX; i++ ){
 			this.adat[i].left = this.XMAX;
 			this.adat[i].right = -1;
@@ -275,7 +275,7 @@ var Game = function(){
 			for( j=0; j<this.XMAX; j++ ){
 				an = this.cel[c];
 				if( an>0 ){
-					// 中心地からの距離（境界線近くはなるべく避ける）
+					// 中心地からの距離（境界線近くはなるべく避ける） (english: distance from center, avoid near borders)
 					x = this.adat[an].cx-j; if( x<0 ) x = -x;
 					y = this.adat[an].cy-i; if( y<0 ) y = -y;
 					len = x+y;
@@ -286,13 +286,13 @@ var Game = function(){
 							var an2 = this.cel[pos];
 							if( an2 != an ){
 								f=1;
-								// ついでに隣接データも作成
+								// ついでに隣接データも作成 (english: also create adjacency data)
 								this.adat[an].join[an2] = 1;
 							}
 						}
 					}
 					if( f ) len += 4;
-					// 距離が近いものを中心地とする
+					// 距離が近いものを中心地とする (english: choose closest as center)
 					if( len < this.adat[an].len_min ){
 						this.adat[an].len_min = len;
 						this.adat[an].cpos = i*this.XMAX+j;
@@ -302,10 +302,10 @@ var Game = function(){
 			}
 		}
 
-		// エリア属軍を決める
+		// エリア属軍を決める (english: decide area army)
 		for( i=0; i<this.AREA_MAX; i++ ) this.adat[i].arm = -1;
-		var arm=0;	// 属軍
-		var alist = new Array(this.AREA_MAX);	// エリアリスト
+		var arm=0;	// 属軍 (english: army)
+		var alist = new Array(this.AREA_MAX);	// エリアリスト (english: area list)
 		while( 1 ){
 			var c = 0;
 			for( i=1; i<this.AREA_MAX; i++ ){
@@ -319,7 +319,7 @@ var Game = function(){
 			this.adat[an].arm = arm;
 			arm++; if( arm>=this.pmax ) arm=0;
 		}
-		// エリア描画線のデータ作成
+		// エリア描画線のデータ作成 (english: create area drawing line data)
 		for( i=0; i<this.AREA_MAX; i++ ) this.chk[i] = 0;
 		for( i=0; i<this.cel_max; i++ ){
 			var area = this.cel[i];
@@ -336,7 +336,7 @@ var Game = function(){
 				}
 			}
 		}
-		// ダイス配置
+		// ダイス配置 (english: place dice)
 		var anum = 0;
 		for( i=1; i<this.AREA_MAX; i++ ){
 			if( this.adat[i].size > 0 ){
@@ -367,45 +367,45 @@ var Game = function(){
 		
 	}
 	/////////////////////////////////////////////////////////////////////
-	// 浸透してエリアを作る
+	// 浸透してエリアを作る (english: create area by percolation)
 	this.percolate = function( pt, cmax, an ){
 		if( cmax < 3 ) cmax = 3;
 
 		var i,j,k;
-		var opos = pt;	// スタートセル
+		var opos = pt;	// スタートセル (english: start cell)
 
-		//	隣接フラグ
+		//	隣接フラグ (english: adjacency flags)
 		for(i=0; i<this.cel_max; i++ ) this.next_f[i]=0; 
 
-		var c = 0;			// セル数
+		var c = 0;			// セル数 (english: cell count)
 		while( 1 ){
 			this.cel[opos] = an;
 			c++;
-			// 周囲セル
+			// 周囲セル (english: surrounding cells)
 			for( i=0; i<6; i++ ){
 				var pos = this.join[opos].dir[i];
 				if( pos<0 ) continue;
 				this.next_f[pos] = 1;
 			}
-			// 周囲セルで最小通番を次のセルにする
+			// 周囲セルで最小通番を次のセルにする (english: choose next cell with smallest serial number among surrounding cells)
 			var min = 9999;
 			for( i=0; i<this.cel_max; i++ ){
-				if( this.next_f[i] == 0 ) continue;	// 隣接してない
-				if( this.cel[i] > 0 ) continue;	// すでにエリア化
-				if( this.num[i] > min ) continue;	// 最小通番でない
+				if( this.next_f[i] == 0 ) continue;	// 隣接してない (english: not adjacent)
+				if( this.cel[i] > 0 ) continue;	// すでにエリア化 (english: already part of area)
+				if( this.num[i] > min ) continue;	// 最小通番でない (english: not smallest serial number)
 				min = this.num[i];
 				opos = i;
 			}
 			if( min == 9999 ) break;
-			if( c>=cmax ) break;	// 与えられた面積を超えた
+			if( c>=cmax ) break;	// 与えられた面積を超えた (english: exceeded given area size)
 		}
-		// 隣接セルを加える
+		// 隣接セルを加える (english: add adjacent cells)
 		for( i=0; i<this.cel_max; i++ ){
 			if( this.next_f[i] == 0 ) continue;
-			if( this.cel[i] > 0 ) continue;		// すでにエリア化
+			if( this.cel[i] > 0 ) continue;		// すでにエリア化 (english: already part of area)
 			this.cel[i] = an;
 			c++;
-			// さらに隣接セルを次のエリアの候補とする
+			// さらに隣接セルを次のエリアの候補とする (english: make further adjacent cells candidates for next area)
 			for( k=0; k<6; k++ ){
 				var pos = this.join[i].dir[k];
 				if( pos<0 ) continue;
@@ -415,21 +415,21 @@ var Game = function(){
 		return c;
 	}
 	/////////////////////////////////////////////////////////////////////
-	// エリア描画線データ作成
+	// エリア描画線データ作成 (english: create area drawing line data)
 	this.set_area_line = function( old_cel, old_dir ){
 		var c = old_cel;
 		var d = old_dir;
-		var area = this.cel[c];	// エリア番号
+		var area = this.cel[c];	// エリア番号 (english: area number)
 		var cnt = 0;
 		this.adat[area].line_cel[cnt] = c;
 		this.adat[area].line_dir[cnt] = d;
 		cnt++;
 		for( var i=0; i<100; i++ ){
-			d++; if( d>=6 ) d=0;	// 方向加算
+			d++; if( d>=6 ) d=0;	// 方向加算 (english: increment direction)
 			var n = this.join[c].dir[d];
 			if( n>=0 ){
 				if( this.cel[n] == area ){
-					// 隣が同じエリアの場合、セル移動、方向マイナス２
+					// 隣が同じエリアの場合、セル移動、方向マイナス２ (english: if neighbor is same area, move cell, decrement direction by 2)
 					c = n;
 					d-=2; if( d<0 ) d+=6;
 				}

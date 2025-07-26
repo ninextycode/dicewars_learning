@@ -1,3 +1,5 @@
 venv
 server/history
 activate
+.ipynb_checkpoints
+.vscode

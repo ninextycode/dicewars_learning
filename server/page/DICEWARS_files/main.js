@@ -1019,10 +1019,13 @@ function after_battle(){
 	// 履歴
 	game.set_his(game.area_from,game.area_to,defeat);
 
-	if( game.player[game.user].area_tc==0 ){
-		draw_player_data();
-		start_gameover();
-	}else{
+	// commented the code below to avoid gameover on player zero defeat
+	// instead, play until one winner remains
+
+	// if( game.player[game.user].area_tc==0 ){
+	// 	draw_player_data();
+	// 	start_gameover();
+	// }else{
 		var c=0;
 		for( var i=0; i<game.pmax; i++ ){
 			if( game.player[i].area_tc>0 ) c++;
@@ -1033,7 +1036,7 @@ function after_battle(){
 		}else{
 			start_player();
 		}
-	}
+	// }
 }
 
 ////////////////////////////////////////////////////
@@ -1348,113 +1351,124 @@ function toppage(){
 
 // Data extraction
 function get_area_data() {
-    let internal_area_ids = [];
+	let internal_area_ids = [];
+	let area_id_to_index = [];
+	let node_positions = [];
 
-    // Collect existing areas
-    for(i = 0; i < game.AREA_MAX; i++){
-        if(game.adat[i].size > 0){
-            internal_area_ids.push(i);
-        }
-    }
-    
+	// Collect existing areas
+	for(i = 0; i < game.AREA_MAX; i++){
+		if(game.adat[i].size > 0){
+			area_id_to_index.push(internal_area_ids.length);
+			internal_area_ids.push(i);
+		} else {
+			area_id_to_index.push(-1);
+		}
+	}
+	
 	let num_areas = internal_area_ids.length;
 
 	let adjacency = new Array(num_areas);
-    for (let i = 0; i < num_areas; i++){
-        adjacency[i] = new Array(num_areas).fill(0);
-    }
+	for (let i = 0; i < num_areas; i++){
+		adjacency[i] = new Array(num_areas).fill(0);
+	}
+
 	for (let i = 0; i < num_areas; i++){
 		let area_id = internal_area_ids[i];
-		
+		let area_data = game.adat[area_id];
+
+		node_positions.push([area_data.cx, area_data.cy]);
 		// Set adjacency relationships
 		for (let j = 0; j < num_areas; j++){
 			let other_area_id = internal_area_ids[j];
-			if(game.adat[area_id].join[other_area_id] > 0){
+			if(area_data.join[other_area_id] > 0){
 				adjacency[i][j] = 1;
 			}
 		}
 	}
+
 	return {
 		adjacency: adjacency, 
-		internal_area_ids: internal_area_ids
+		internal_area_ids: internal_area_ids,
+		node_positions: node_positions,
+		area_id_to_index: area_id_to_index
 	};
 }
 
 function get_curret_game_state(){
-    let result = {
-        teams: [],
-        dice: []
-    };
-    
-    // Fill data for existing areas only
-    for (let i = 0; i < game.AREA_MAX; i++){
-        if(game.adat[i].size > 0) {
+	let result = {
+		teams: [],
+		dice: []
+	};
+	
+	// Fill data for existing areas only
+	for (let i = 0; i < game.AREA_MAX; i++){
+		if(game.adat[i].size <= 0) {
 			continue;
 		}
-        // Set team and dice count
-        result.teams.push(game.adat[area_id].arm);
-        result.dice.push(game.adat[area_id].dice);
-    }
+		// Set team and dice count
+		result.teams.push(game.adat[i].arm);
+		result.dice.push(game.adat[i].dice);
+	}
 
-    return result;
+	return result;
 }
 
 // Make AI move for current player
 function make_ai_move(){
 	start_com();
-    
+	
 	let move_made = (timer_func === com_from);
 	let turn_end = (timer_func === supply_waiting);
 
-    return {
-        success: true,
-        from: move_made ? game.area_from : null,
-        to: move_made ? game.area_to : null,
+	return {
+		success: true,
+		from: move_made ? game.area_from : null,
+		to: move_made ? game.area_to : null,
 		move_made: move_made,
 		turn_end: turn_end
-    };
+	};
 }
 
 // Simulate a move (for external control)
 function simulate_move(from_area_id, to_area_id){
-    // Validate the move
-    if(game.adat[from_area_id].size == 0 || game.adat[to_area_id].size == 0){
-        return {success: false, error: "Invalid areas"};
-    }
-    if(game.adat[from_area_id].arm != game.get_pn()){
-        return {success: false, error: "Not your area"};
-    }
-    if(game.adat[from_area_id].join[to_area_id] == 0){
-        return {success: false, error: "Areas not adjacent"};
-    }
-    if(game.adat[from_area_id].dice <= 1){
-        return {success: false, error: "Need at least 2 dice to attack"};
-    }
-    
-    // Set the attack parameters
-    game.area_from = from_area_id;
-    game.area_to = to_area_id;
-    
-    // Execute the battle directly
-    start_battle();
+	// Validate the move
+	if(game.adat[from_area_id].size == 0 || game.adat[to_area_id].size == 0){
+		return {success: false, error: "Invalid areas"};
+	}
+	if(game.adat[from_area_id].arm != game.get_pn()){
+		return {success: false, error: "Not your area"};
+	}
+	if(game.adat[from_area_id].join[to_area_id] == 0){
+		return {success: false, error: "Areas not adjacent"};
+	}
+	if(game.adat[from_area_id].dice <= 1){
+		return {success: false, error: "Need at least 2 dice to attack"};
+	}
+	
+	// Set the attack parameters
+	game.area_from = from_area_id;
+	game.area_to = to_area_id;
+	
+	// Execute the battle directly
+	start_battle();
 
-    return {
-        success: true,
-        from: from_area_id,
-        to: to_area_id
-    };
+	return {
+		success: true,
+		from: from_area_id,
+		to: to_area_id
+	};
 }
 
 // End turn programmatically
 function end_turn_programmatic(){
-    // Call the existing end_turn function
-    end_turn();
-    
-    return {
-        success: true,
-        current_player: game.get_pn(),
-        turn_index: game.ban
-    };
+	// Call the existing end_turn function
+	end_turn();
+	
+	return {
+		success: true,
+		current_player: game.get_pn(),
+		turn_index: game.ban
+	};
 }
 
 function ai_only() {
@@ -1463,6 +1477,8 @@ function ai_only() {
 
 let game_history = {
 	internal_area_ids: [],
+	area_id_to_index: [],
+	node_positions: [],
 	adjacency: [],
 	states: [],
 	actions: []
@@ -1471,6 +1487,7 @@ let game_history = {
 async function save_history() {
 	try {
 		// Send to server via API call
+		console.log('Sending game history to server...');
 		const response = await fetch('/api/save-history', {
 			method: 'POST',
 			headers: {
@@ -1492,19 +1509,26 @@ let last_was_attack = false;
 let last_was_endturn = false;
 
 function get_last_action_data() {
-    return {
+	let area_from = game_history.area_id_to_index[game.area_from];
+	let area_to = game_history.area_id_to_index[game.area_to];
+	
+	game_history.internal_area_ids
+
+	return {
 		player: game.get_pn(),
-        from: last_was_attack ? game.area_from : null,
-        to: last_was_attack ? game.area_to : null,
+		from: last_was_attack ? area_from : null,
+		to: last_was_attack ? area_to : null,
 		move_made: last_was_attack,
 		turn_end: last_was_endturn
-    };
+	};
 }
 
 function save_area_data() {
 	let area_data = get_area_data();
 	game_history.internal_area_ids = area_data.internal_area_ids;
+	game_history.area_id_to_index = area_data.area_id_to_index;
 	game_history.adjacency = area_data.adjacency;
+	game_history.node_positions = area_data.node_positions;
 }
 
 function extend_history() {
@@ -1514,11 +1538,10 @@ function extend_history() {
 	game_history.actions.push(action_data);
 }
 
-function wrap_trick_save_game_history() {
+function maintain_game_history() {
 	if (history_saved_wrap) { return false; }
 	history_saved_wrap = true;
 
-	start_supply = new_start_supply;
 	let old_start_game = start_game;
 	let new_start_game = function() {
 		save_area_data();
@@ -1531,7 +1554,8 @@ function wrap_trick_save_game_history() {
 	let new_start_battle = function() {
 		last_was_attack = true;
 		last_was_endturn = false;
-		extend_history()
+		// history is extended before each battle and each end-turn-resupply
+		extend_history();
 		console.log("new_start_battle history saved")
 		old_start_battle();
 	};
@@ -1541,13 +1565,17 @@ function wrap_trick_save_game_history() {
 	let new_start_supply = function() {
 		last_was_attack = false;
 		last_was_endturn = true;
-		extend_history()
+		// history is extended before each battle and each end-turn-resupply
+		extend_history();
 		console.log("new_start_supply history saved")
 		old_start_supply();
 	};
+	start_supply = new_start_supply;
 
 	let old_start_win = start_win;
 	let new_start_win = function() {
+		// save the terminal state, dont save action - there was none
+		game_history.states.push(get_curret_game_state());
 		old_start_win();
 		save_history();
 	};
@@ -1555,12 +1583,42 @@ function wrap_trick_save_game_history() {
 
 	let old_start_gameover = start_gameover;
 	let new_start_gameover = function() {
+		// save the terminal state, dont save action - there was none
+		game_history.states.push(get_curret_game_state());
 		old_start_gameover();
 		save_history();
 	};
 	start_gameover = new_start_gameover;
 }
 
+function restart() {
+	Object.keys(game_history).forEach(key => {
+		game_history[key] = [];
+	});
+	console.log("history cleaned")
+
+	make_map();
+	start_game();
+}
+
 function auto_restart() {
-	location.reload();
+	let old_start_win = start_win;
+	let new_start_win = function() {
+		old_start_win();
+		restart();
+	};
+	start_win = new_start_win;
+
+	let old_start_gameover = start_gameover;
+	let new_start_gameover = function() {
+		old_start_gameover();
+		restart();
+	};
+	start_gameover = new_start_gameover;
+}
+
+function autoplay() {
+	maintain_game_history();
+	auto_restart();
+	ai_only();
 }
