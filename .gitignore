@@ -3,3 +3,6 @@ server/history
 activate
 .ipynb_checkpoints
 .vscode
+*.pt
+*.csv
+__pycache__
