@@ -16,7 +16,7 @@ def add_self_edges(edges):
     end_node = edges[1]
     has_self_edge = torch.unique(start_node[start_node == end_node])
     
-    has_self_edge_map = torch.zeros(n_nodes, dtype=np.bool)
+    has_self_edge_map = torch.zeros(n_nodes, dtype=torch.bool)
     has_self_edge_map[has_self_edge] = True
     nodes_without_self_edge = all_nodes[~has_self_edge_map]
     
@@ -40,26 +40,31 @@ def extract_edges(history_data):
     return adj_matrix_to_edges(history_data["adjacency"], add_self_edges=True)
 
 
-def extract_nodes_states(history_data, drop_terminal_state=True):
+def extract_nodes_states(history_data):
     states_data = history_data["states"]
-    if drop_terminal_state:
-        states_data = states_data[:-1]  # drop the last "terminal" state
-    dice_values = np.array([s["dice"] for s in states_data])
-    player_values = np.array([s["teams"] for s in states_data])
+    dice_values = torch.tensor([s["dice"] for s in states_data])
+    player_ids = torch.tensor([s["teams"] for s in states_data])
 
     adj_matrix = history_data["adjacency"]
 
     n_nodes = len(adj_matrix)
     n_states = len(states_data)
     n_players = 8
-
+    
+    # nodes_states - [n_states, n_nodes, n_players]
     nodes_states = torch.zeros(n_states, n_nodes, n_players, dtype=torch.float32)
 
     state_idx, node_idx = np.ogrid[:n_states, :n_nodes]
-    idx = (state_idx, node_idx, player_values)
-    nodes_states[idx] = torch.tensor(dice_values, dtype=torch.float32)
+    state_idx = torch.tensor(state_idx)
+    node_idx = torch.tensor(node_idx)
+    idx = (state_idx, node_idx, player_ids)
+    nodes_states[idx] = dice_values.to(torch.float32)
 
-    return nodes_states
+    winner = player_ids[-1].unique().squeeze()
+    if winner.ndim != 0:
+        raise ValueError("Multiple winners")
+    
+    return player_ids, nodes_states, winner
 
 
 def extract_action_values(history_data):
@@ -78,7 +83,6 @@ def extract_action_values(history_data):
     for action in history_data["actions"]:
         player_id = action["player"]
         action_count[player_id] += 1
-
 
     for action in history_data["actions"]:
         player_id = action["player"] 
@@ -103,7 +107,8 @@ def extract_action_values(history_data):
 
         if action["move_made"] and action["turn_end"]:
             raise ValueError("An action cannot be both a move and an end turn at the same time.")
-        
+    
+    active_players = torch.tensor(active_players, dtype=torch.int32)
     attack_edges = torch.tensor(attack_edges, dtype=torch.int32)
     end_turn_players = torch.tensor(end_turn_players, dtype=torch.int32)
     action_values = torch.tensor(action_values, dtype=torch.float32)
@@ -111,7 +116,7 @@ def extract_action_values(history_data):
     return active_players, attack_edges, end_turn_players, action_values
 
 
-def load_dicewars_data(json_data, drop_terminal_state=True):
+def process_json_data(json_data):
     if isinstance(json_data, str):
         try:
             graph_id = int(json_data.split("_")[1])
@@ -122,18 +127,34 @@ def load_dicewars_data(json_data, drop_terminal_state=True):
         json_data = json.load(open(json_data, "r"))
     else:
         graph_id = torch.randint(low=0, high=2**63-1, size=(1,), dtype=torch.uint64)[0]
+    return graph_id, json_data
 
-    nodes_states = extract_nodes_states(json_data, drop_terminal_state=drop_terminal_state)
+
+def load_dicewars_data(json_data, drop_terminal_state=True):
+    graph_id, json_data = process_json_data(json_data)
+    # nodes_states - [n_states, n_nodes, n_players]
+    player_ids, nodes_states, winner = extract_nodes_states(json_data)
+
+    if drop_terminal_state:
+        nodes_states = nodes_states[:-1]  # drop the last "terminal" state
+
     edges = extract_edges(json_data)
     active_players, attack_edges, end_turn_players, action_values = \
         extract_action_values(json_data)
+    
+    adj_matrix = torch.tensor(json_data["adjacency"])
+    node_positions = torch.tensor(json_data["node_positions"])
 
     return dict(
         graph_id=graph_id,
+        player_ids=player_ids,
         nodes_states=nodes_states, 
         attack_edges=attack_edges,  
         active_players=active_players,
         end_turn_players=end_turn_players, 
         action_values=action_values, 
-        edges=edges
+        edges=edges,
+        adj_matrix=adj_matrix,
+        node_positions=node_positions,
+        winner=winner
     )

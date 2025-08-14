@@ -2,9 +2,9 @@ import torch
 from learning.data.process_utils import get_active_edges_mask
 
 
-def collate_av_data(sample_list):
+def collate_av2_data(sample_list):
     """
-    Collate function that combines multiple graph states into a single graph state.
+    Collate function that combines multiple node value data samples into a single batch.
     
     Node indices are shifted to become the merged super-graph indices, allowing
     batch processing of multiple graphs as a single large graph.
@@ -14,54 +14,40 @@ def collate_av_data(sample_list):
         
     Returns:
         dict: Combined batch with the following keys:
-            - nodes_states: Combined node features
-            - attack_edges: Attack edge indices with adjusted offsets
+            - nodes_states: Combined node states - graph positional embeddings and numbers
             - original_attack_edges: Original attack edge indices (un-shifted)
             - action_values: Action values
+            - player_ids: Combined player IDs
             - node_graph_ids: Graph ID for each node
             - edge_graph_ids: Graph ID for each edge
             - all_edges: Combined edge indices with adjusted offsets
-            - graph_reindexes: Re-indexing applied to node states to achieve the order
-                                where the first feature corresponds to active player,
-                                others - to players in descending order of their # of dice
     """
-    # graph data collate function that combines multiple graph staters into a single graph state
-    # node indices are shifted to become the merged super-graph indices
-    nodes_states = []
-    shifted_attack_edges = []
+    node_states = []
     original_attack_edges = []
     action_values = []
     all_edges = []
     per_graph_edges = []
     node_graph_ids = []
     edge_graph_ids = []
-    graph_reindexes = []
     
     node_id_offset = 0
     for i, sample in enumerate(sample_list):
-        nodes_states.append(sample["nodes_state"])
-        
-        # Store the original attack edge before shifting
-        original_attack_edges.append(sample["attack_edge"].clone())
-        
-        # Apply offset for the shifted attack edge
-        sample_attack_edge = sample["attack_edge"].clone() 
-        if sample_attack_edge[0] != -1:
-            sample_attack_edge += node_id_offset
-        shifted_attack_edges.append(sample_attack_edge)
-        
+        node_states.append(sample["node_states"])
+        original_attack_edges.append(sample["attack_edge"])
         action_values.append(sample["action_value"])
+        
         all_edges.append(sample["edges"] + node_id_offset)
         per_graph_edges.append(sample["edges"])
-        n_nodes = sample["nodes_state"].shape[0]
+        
+        n_nodes = sample["node_states"].shape[0]
         n_edges = sample["edges"].shape[1]
+        
         node_graph_ids.append(torch.full((n_nodes,), i, dtype=torch.int32))
         edge_graph_ids.append(torch.full((n_edges,), i, dtype=torch.int32))
+        
         node_id_offset += n_nodes
-        graph_reindexes.append(sample["reindex"])
 
-    nodes_states = torch.cat(nodes_states)
-    shifted_attack_edges = torch.stack(shifted_attack_edges)
+    node_states = torch.cat(node_states)
     original_attack_edges = torch.stack(original_attack_edges)
     action_values = torch.tensor(action_values, dtype=torch.float32)
     all_edges = torch.cat(all_edges, dim=1)
@@ -69,24 +55,24 @@ def collate_av_data(sample_list):
     edge_graph_ids = torch.cat(edge_graph_ids)
 
     return dict(
-        nodes_states=nodes_states,
-        shifted_attack_edges=shifted_attack_edges,
+        nodes_states=node_states,
         original_attack_edges=original_attack_edges,
         action_values=action_values,
         node_graph_ids=node_graph_ids,
         edge_graph_ids=edge_graph_ids,
         all_edges=all_edges,
-        per_graph_edges=per_graph_edges,
-        graph_reindexes=graph_reindexes
+        per_graph_edges=per_graph_edges
     )
 
 
 def extract_input(batch):
+    # Create node features by combining dice numbers and player IDs
     nodes_states = batch["nodes_states"]
     all_edges = batch["all_edges"]
     node_graph_ids = batch["node_graph_ids"]
     edge_graph_ids = batch["edge_graph_ids"]
-    return nodes_states, all_edges, node_graph_ids, edge_graph_ids 
+    
+    return nodes_states, all_edges, node_graph_ids, edge_graph_ids
 
 
 def extract_output_target(batch, model_output, mean_val, std_val):
@@ -103,7 +89,8 @@ def extract_output_target(batch, model_output, mean_val, std_val):
         attack_edge_value = graph_output["edge_attack_val"]
         graph_node_states = nodes_states[graph_i == node_graph_ids]
         graph_edges = per_graph_edges[graph_i]
-        active_edges_mask = get_active_edges_mask(graph_node_states, graph_edges)
+        # a bunch of embedding data is saved in first columns, player dice data is the last 8
+        active_edges_mask = get_active_edges_mask(graph_node_states, graph_edges, active_player=-8)
         active_edges = graph_edges[:, active_edges_mask]
         
         graph_attack_edge = all_attack_edges[graph_i]

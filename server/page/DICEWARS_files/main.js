@@ -686,7 +686,6 @@ function start_player(){
 	
 	if( game.jun[game.ban] == game.user ){
 		start_man();
-		// start_com();  // ai only mode
 	}else{
 //		start_man();
 		start_com();
@@ -1432,6 +1431,9 @@ function make_ai_move(){
 // Simulate a move (for external control)
 function simulate_move(from_area_id, to_area_id){
 	// Validate the move
+	if (click_func != first_click) {
+		return {success: false, error: "Game does not expect a move right now"};
+	}
 	if(game.adat[from_area_id].size == 0 || game.adat[to_area_id].size == 0){
 		return {success: false, error: "Invalid areas"};
 	}
@@ -1450,7 +1452,15 @@ function simulate_move(from_area_id, to_area_id){
 	game.area_to = to_area_id;
 	
 	// Execute the battle directly
-	start_battle();
+	// start_battle();
+	
+	// start the "timer" that would visualise the move 
+	// and call start_battle() internally
+	waitcount = 5;
+	timer_func = com_from;
+	click_func = null;
+	move_func = null;
+	releaese_func = null;
 
 	return {
 		success: true,
@@ -1461,6 +1471,9 @@ function simulate_move(from_area_id, to_area_id){
 
 // End turn programmatically
 function end_turn_programmatic(){
+	if (click_func != first_click) {
+		return {success: false, error: "Game does not expect a move right now"};
+	}
 	// Call the existing end_turn function
 	end_turn();
 	
@@ -1469,6 +1482,10 @@ function end_turn_programmatic(){
 		current_player: game.get_pn(),
 		turn_index: game.ban
 	};
+}
+
+function manual_only() {
+	start_com = start_man
 }
 
 function ai_only() {
@@ -1482,6 +1499,20 @@ let game_history = {
 	adjacency: [],
 	states: [],
 	actions: []
+}
+
+function get_game_state() {
+    const last_state = game_history.states.length > 0 
+        ? game_history.states[game_history.states.length - 1] 
+        : null;
+    
+    return {
+        internal_area_ids: game_history.internal_area_ids,
+        area_id_to_index: game_history.area_id_to_index,
+        node_positions: game_history.node_positions,
+        adjacency: game_history.adjacency,
+        state: last_state
+    };
 }
 
 async function save_history() {
@@ -1621,4 +1652,8 @@ function autoplay() {
 	maintain_game_history();
 	auto_restart();
 	ai_only();
+}
+
+function faster() {
+	createjs.Ticker.setFPS(600);
 }

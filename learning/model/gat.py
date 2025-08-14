@@ -1,6 +1,8 @@
 import torch
 from torch import nn
+from learning.model.utils import indexed_softmax
 
+# https://arxiv.org/pdf/1710.10903
 
 # adding bias in intermediate layers is an unnecessary complication
 # same shift is a message will be reduced by softmax exponent ratio
@@ -40,124 +42,118 @@ class GATAttentionCoefficients(nn.Module):
     
 
 class GATLayer(nn.Module):
-    def __init__(self, in_features, out_features, p_msg_dropout=0.35):
-        # edges = 2 x |E| numpy array
+    def __init__(
+            self, 
+            in_features, 
+            out_features,
+            n_output_heads=1,
+            concatenate_outputs=True,
+            p_msg_dropout=0.35
+        ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.message_fn = GATMessage(in_features, out_features, p_msg_dropout)
-        self.attention_coef_fn = GATAttentionCoefficients(2 * out_features)
+        self.message_heads = nn.ModuleList([
+            GATMessage(in_features, out_features, p_msg_dropout)
+            for _ in range(n_output_heads)
+        ])
+
+        self.attention_coef_heads = nn.ModuleList([
+            GATAttentionCoefficients(2 * out_features)
+            for _ in range(n_output_heads)
+        ])
+
         self.attention_dropout = nn.Dropout(p=0.35)
         self.activation_fn = nn.ReLU()
 
-        self.residual_proj = nn.Linear(in_features, out_features, bias=False)
-        torch.nn.init.eye_(self.residual_proj.weight) 
+        self.concatenate_outputs = concatenate_outputs
+        if self.concatenate_outputs:
+            full_out_features = out_features * n_output_heads
+        else:
+            full_out_features = out_features
+        self.in_states_pass = nn.Linear(in_features, full_out_features, bias=False)
+        torch.nn.init.eye_(self.in_states_pass.weight) 
         # Exclude residual projection layer from learning
         # it should merely change input shape to be added to output
-        self.residual_proj.weight.requires_grad = False
+        self.in_states_pass.weight.requires_grad = False
         self.residual_dropout = nn.Dropout(p=0.35)
-        self.passthrough_coef = nn.Parameter(torch.tensor(1.0))
+        self.passthrough_coef = nn.Parameter(torch.tensor(-1.0))
+
         self.reset_parameters()
         
     def reset_parameters(self):
         # Reset parameters of sub-modules
-        self.message_fn.reset_parameters()
-        self.attention_coef_fn.reset_parameters()
+        for head in self.message_heads:
+            head.reset_parameters()
+        for head in self.attention_coef_heads:
+            head.reset_parameters()
         # Initialize passthrough coefficient
-        nn.init.constant_(self.passthrough_coef, 1.0)
+        nn.init.constant_(self.passthrough_coef, -1.0)
 
     def forward(self, in_states, edges):
         # when multiple graphs are batched together into one, this function can avoid using explicit graph_id for nodes
         # because the nodes in different graphs are never each other neighbors 
         # in_states has dimensions [n_nodes, in_features]
-        n_nodes = in_states.shape[0]    
-        messages = self.message_fn(in_states)
-        # messages has dimensions [n_edges, out_features]
-        m_from = messages[edges[0], :]
-        m_to = messages[edges[1], :]
-        # m_stack has dimensions [n_edges, 2 * out_features]
-        m_stack = torch.cat([m_from, m_to], dim=-1)
-        # attention_coef has dimensions [n_edges]
-        attention_coef = self.attention_coef_fn(m_stack)
-        
+        n_nodes = in_states.shape[0]
+
+        messages = []
+        for message_head in self.message_heads:
+            messages.append(message_head(in_states))
+        # messages has dimensions [n_nodes, n_heads, out_features]
+        messages = torch.stack(messages, dim=1) 
+
+        # m_from / m_to have dimensions [n_edges, n_heads, out_features]
+        msg_from = messages[edges[0], ...]
+        msg_to = messages[edges[1], ...]
+        # m_stack have dimensions [n_edges, n_heads, 2 * out_features]
+        msg_stack = torch.cat([msg_from, msg_to], dim=-1)
+
+        attention_coeffs = []
+        for i, attention_head in enumerate(self.attention_coef_heads):
+            # output has 1-d dimension [n_edges]
+            attention_coeffs.append(attention_head(msg_stack[:, i, :]))
+        # attention_coeffs has dimensions [n_edges, n_heads]
+        attention_coeffs = torch.stack(attention_coeffs, dim=1)
+
+        # softmax_attention_coef has dimensions [n_edges, n_heads]
         softmax_attention_coef = indexed_softmax(
-            attention_coef, edges[1]
+            attention_coeffs, edges[1], indexed_dim=0
         )
         softmax_attention_coef = self.attention_dropout(softmax_attention_coef)
         
         # edges[0] - source/input end of the edge
-        # scaled_messages_along_input_edges - [n_edges, out_features]
-        scaled_messages_along_input_edges = \
-            softmax_attention_coef[..., torch.newaxis] * messages[edges[0]]
+        # softmax_attention_coef[:, :, torch.newaxis] - [n_edges, n_heads, 1]
+        # scaled_input_messages - [n_edges, n_heads, out_features]
+        scaled_input_messages = \
+            softmax_attention_coef[:, :, torch.newaxis] * msg_from
 
-        # merged_msgs - [n_nodes, out_features]
+        # merged_msgs - [n_nodes, n_heads, out_features]
         merged_msgs = torch.zeros_like(messages)
-        # (n_edges) are scattered into (n_nodes) 
+        # scattered inputs (n_edges) are pooled into (n_nodes) outputs 
         merged_msgs.index_add_(
             dim=0,
             index=edges[1],  # edges[1] - target/output end of the edge
-            source=scaled_messages_along_input_edges
+            source=scaled_input_messages
         )
 
-        # merged_msgs = torch.empty(
-        #     n_nodes, self.out_features,
-        #     dtype=messages.dtype, device=messages.device
-        # )
-        # for i_node in range(n_nodes):
-        #     in_edge_map_idx = edges[1] == i_node
-        #     neighbors = edges[0][in_edge_map_idx]
-        #     # neighb_msgs - [n_nbh, out_f]
-        #     neighb_msgs = messages[neighbors, :]
-        #     # neighb_att - [n_nbh]
-        #     neighb_att_coef = attention_coef[in_edge_map_idx]
-        #     neighb_att = nn.functional.softmax(neighb_att_coef, dim=0)
-        #     neighb_att = self.attention_dropout(neighb_att)
-        #     # broadcast attention coefficients over the last dim = same over all instance features
-        #     # merged_msg - [out_f]
-        #     merged_msg = torch.sum(neighb_msgs * neighb_att[..., torch.newaxis], dim=0)
-        #     merged_msgs[i_node, :] = merged_msg
+        # old_states_pass - [n_nodes, out_features / out_features * n_heads]
+        old_states_pass = self.in_states_pass(in_states) * torch.sigmoid(self.passthrough_coef)
 
-        new_states_res = self.activation_fn(merged_msgs)
-        new_states_res = self.residual_dropout(new_states_res)
-        old_states_passthrough = self.residual_proj(in_states) * torch.sigmoid(self.passthrough_coef)
-        new_states = old_states_passthrough + new_states_res
+        if not self.concatenate_outputs:
+            # average head outputs
+            # merged_msgs - [n_nodes, out_features]
+            merged_msgs = torch.mean(merged_msgs, dim=0)
+
+        # new_states_residual - [n_nodes, n_heads, out_features]
+        new_states_residual = self.activation_fn(merged_msgs)
+        new_states_residual = self.residual_dropout(new_states_residual)
+
+        if self.concatenate_outputs:
+            #  [n_nodes, n_heads, out_features] -> [n_nodes, (n_heads * out_features)]
+            new_states_residual = new_states_residual.reshape((n_nodes, -1))
+        
+        new_states = old_states_pass + new_states_residual
         return new_states
-
-
-def indexed_softmax(values: torch.Tensor, indices: torch.Tensor):
-    # values - [n_items]
-    # sorted_indices - [n_items] 
-    n_indices = indices.max() + 1  
-    # max_per_index - [n_indices]
-    max_per_index = torch.full(
-        (n_indices,), -float('inf'),
-        device=values.device,
-        dtype=values.dtype
-    )
-
-    max_per_index.scatter_reduce_(
-        dim=0,
-        index=indices,
-        src=values,
-        reduce="amax"
-    )
-    values_exp = torch.exp(values - max_per_index[indices])
-
-    sum_per_index = torch.zeros(
-        size=max_per_index.shape,
-        dtype=values_exp.dtype,
-        device=values_exp.device
-    )
-    sum_per_index.scatter_reduce_(
-        dim=0,
-        index=indices,
-        src=values_exp,
-        reduce="sum"
-    )
-    values_softmax = values_exp / sum_per_index[indices]
-    # values_softmax - [n_items]
-    # groups corresponding to indices are mapped to their softmax map
-    return values_softmax
 
 
 class GATGraphSummary(nn.Module):
