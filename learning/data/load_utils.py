@@ -40,6 +40,21 @@ def extract_edges(history_data):
     return adj_matrix_to_edges(history_data["adjacency"], add_self_edges=True)
 
 
+def scatter_dice_values(dice_values, player_ids):
+    n_states = dice_values.shape[-2]
+    n_nodes = dice_values.shape[-1]
+    n_players = 8
+    # nodes_states - [n_states, n_nodes, n_players]
+    nodes_states = torch.zeros(n_states, n_nodes, n_players, dtype=torch.float32)
+
+    state_idx, node_idx = np.ogrid[:n_states, :n_nodes]
+    state_idx = torch.tensor(state_idx)
+    node_idx = torch.tensor(node_idx)
+    idx = (state_idx, node_idx, player_ids)
+    nodes_states[idx] = dice_values.to(torch.float32)
+    return nodes_states
+
+
 def extract_nodes_states(history_data):
     states_data = history_data["states"]
     dice_values = torch.tensor([s["dice"] for s in states_data])
@@ -49,10 +64,9 @@ def extract_nodes_states(history_data):
 
     n_nodes = len(adj_matrix)
     n_states = len(states_data)
-    n_players = 8
     
     # nodes_states - [n_states, n_nodes, n_players]
-    nodes_states = torch.zeros(n_states, n_nodes, n_players, dtype=torch.float32)
+    nodes_states = scatter_dice_values(dice_values, player_ids)
 
     state_idx, node_idx = np.ogrid[:n_states, :n_nodes]
     state_idx = torch.tensor(state_idx)

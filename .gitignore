@@ -1,5 +1,5 @@
 venv
-server/history
+history/**
 activate
 .ipynb_checkpoints
 .vscode

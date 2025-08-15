@@ -1018,9 +1018,9 @@ function after_battle(){
 	// 履歴
 	game.set_his(game.area_from,game.area_to,defeat);
 
+	// Extra change:
 	// commented the code below to avoid gameover on player zero defeat
 	// instead, play until one winner remains
-
 	// if( game.player[game.user].area_tc==0 ){
 	// 	draw_player_data();
 	// 	start_gameover();
@@ -1400,6 +1400,8 @@ function get_curret_game_state(){
 	};
 	
 	// Fill data for existing areas only
+	// outputs are inexed by the order non-empty areas exist within the game
+	// not by the order of the game.adat - we skip nonexistant "empty" spaces
 	for (let i = 0; i < game.AREA_MAX; i++){
 		if(game.adat[i].size <= 0) {
 			continue;
@@ -1412,24 +1414,8 @@ function get_curret_game_state(){
 	return result;
 }
 
-// Make AI move for current player
-function make_ai_move(){
-	start_com();
-	
-	let move_made = (timer_func === com_from);
-	let turn_end = (timer_func === supply_waiting);
-
-	return {
-		success: true,
-		from: move_made ? game.area_from : null,
-		to: move_made ? game.area_to : null,
-		move_made: move_made,
-		turn_end: turn_end
-	};
-}
-
 // Simulate a move (for external control)
-function simulate_move(from_area_id, to_area_id){
+function simulate_move(from_area_id, to_area_id) {
 	// Validate the move
 	if (click_func != first_click) {
 		return {success: false, error: "Game does not expect a move right now"};
@@ -1470,7 +1456,7 @@ function simulate_move(from_area_id, to_area_id){
 }
 
 // End turn programmatically
-function end_turn_programmatic(){
+function simulate_end_turn() {
 	if (click_func != first_click) {
 		return {success: false, error: "Game does not expect a move right now"};
 	}
@@ -1502,24 +1488,24 @@ let game_history = {
 }
 
 function get_game_state() {
-    const last_state = game_history.states.length > 0 
-        ? game_history.states[game_history.states.length - 1] 
-        : null;
-    
+	let area_data = get_area_data();
     return {
-        internal_area_ids: game_history.internal_area_ids,
-        area_id_to_index: game_history.area_id_to_index,
-        node_positions: game_history.node_positions,
-        adjacency: game_history.adjacency,
-        state: last_state
+        internal_area_ids: area_data.internal_area_ids,
+        area_id_to_index: area_data.area_id_to_index,
+        adjacency: area_data.adjacency,
+        node_positions: area_data.node_positions,
+        state: get_curret_game_state()
     };
 }
+
+// History tag for save folder
+let history_tag = "history";
 
 async function save_history() {
 	try {
 		// Send to server via API call
 		console.log('Sending game history to server...');
-		const response = await fetch('/api/save-history', {
+		const response = await fetch(`/api/save_history/${history_tag}`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
@@ -1542,8 +1528,6 @@ let last_was_endturn = false;
 function get_last_action_data() {
 	let area_from = game_history.area_id_to_index[game.area_from];
 	let area_to = game_history.area_id_to_index[game.area_to];
-	
-	game_history.internal_area_ids
 
 	return {
 		player: game.get_pn(),
@@ -1656,4 +1640,76 @@ function autoplay() {
 
 function faster() {
 	createjs.Ticker.setFPS(600);
+}
+
+// Make AI move for current player
+function make_ai_move() {
+	start_com();
+	
+	let move_made = (timer_func === com_from);
+	let turn_end = (timer_func === supply_waiting);
+
+	return {
+		success: true,
+		from: move_made ? game.area_from : null,
+		to: move_made ? game.area_to : null,
+		move_made: move_made,
+		turn_end: turn_end
+	};
+}
+
+async function request_model_move() {
+	try {
+		// Send to server via API call
+		console.log('Sending game state to server...');
+		const response = await fetch('/api/model_action', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(get_game_state())
+		});
+		
+		const resp_json = await response.json();
+		
+		if (!resp_json.success) {
+			throw new Error(resp_json.error);
+		}
+		
+		attach_edge = resp_json["attach_edge"]
+		if (attach_edge[0] < 0) {
+			const result = simulate_end_turn();
+			if (!result.success) {
+				console.error('Model end turn failed:', result.error);
+				throw new Error(result.error);
+			}
+			console.log('Model move: end turn');
+		} else {
+			const area_data = get_area_data();
+			const internal_area_ids = area_data.internal_area_ids;
+			const from_area_id = internal_area_ids[attach_edge[0]];
+			const to_area_id = internal_area_ids[attach_edge[1]];
+			const result = simulate_move(from_area_id, to_area_id);
+			if (!result.success) {
+				console.error('Model move failed:', result.error);
+				throw new Error(result.error);
+			}
+			console.log('Model move:', from_area_id, to_area_id);
+		}
+	} catch (error) {
+		console.error('Error getting model move:', error);
+	}
+}
+
+function model_as_player() {
+	history_tag = "with_torch_model"
+	maintain_game_history();
+	auto_restart();
+
+	let old_start_man = start_man;
+	let new_start_man = function() {
+		old_start_man();
+		request_model_move();
+	}
+	start_man = new_start_man;
 }
